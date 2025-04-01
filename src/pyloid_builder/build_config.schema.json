@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["name", "main_script", "datas", "icon", "bundle"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Application name"
+    },
+    "main_script": {
+      "type": "string",
+      "description": "Path to the main Python script"
+    },
+    "datas": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "items": [{ "type": "string" }, { "type": "string" }]
+      },
+      "description": "List of data files to include [source path, destination path]"
+    },
+    "icon": {
+      "type": "string",
+      "description": "Path to the application icon file"
+    },
+    "bundle": {
+      "type": "object",
+      "properties": {
+        "windows": {
+          "type": "string",
+          "enum": ["onefile", "directory"],
+          "description": "Windows build type"
+        },
+        "macos": {
+          "type": "string",
+          "enum": ["app"],
+          "description": "macOS build type"
+        },
+        "linux": {
+          "type": "string",
+          "enum": ["onefile", "directory"],
+          "description": "Linux build type"
+        }
+      },
+      "required": ["windows", "macos", "linux"],
+      "description": "Build settings for each OS"
+    }
+  }
+}
