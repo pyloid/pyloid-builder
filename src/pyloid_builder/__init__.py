@@ -51,6 +51,7 @@ def build_from_spec(spec_path):
     try:
         pyinstaller_run([
             '--clean',  # Clean temporary files
+            '-y',
             spec_path   # Spec file path
         ])
         print("Build completed.")
