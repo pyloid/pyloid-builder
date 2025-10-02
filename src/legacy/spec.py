@@ -1,61 +1,60 @@
 import json
 from pathlib import Path
 import platform
+
+
 def get_platform() -> str:
-    """
-    Returns the name of the current system's platform.
+	"""
+	Returns the name of the current system's platform.
 
-    This function uses `platform.system()` to return the name of the current operating system.
+	This function uses `platform.system()` to return the name of the current operating system.
 
-    Returns
-    -------
-    "windows" | "macos" | "linux"
-        - "windows" for Windows systems
-        - "macos" for macOS systems
-        - "linux" for Linux systems
+	Returns
+	-------
+	"windows" | "macos" | "linux"
+	    - "windows" for Windows systems
+	    - "macos" for macOS systems
+	    - "linux" for Linux systems
 
-    Examples
-    --------
-    >>> from pyloid.utils import get_platform
-    >>> platform_name = get_platform()
-    >>> print(platform_name)
-    windows
-    """
-    os_name = platform.system().lower()
-    os_type = {
-        'darwin': 'macos',
-        'linux': 'linux',
-        'windows': 'windows'
-    }.get(os_name)
-    if os_type is None:
-        raise ValueError(f"Unsupported platform: {os_name}")
-    
-    return os_type
+	Examples
+	--------
+	>>> from pyloid.utils import get_platform
+	>>> platform_name = get_platform()
+	>>> print(platform_name)
+	windows
+	"""
+	os_name = platform.system().lower()
+	os_type = {'darwin': 'macos', 'linux': 'linux', 'windows': 'windows'}.get(os_name)
+	if os_type is None:
+		raise ValueError(f'Unsupported platform: {os_name}')
+
+	return os_type
+
 
 def create_spec_from_json(json_path):
-    with open(json_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
+	with open(json_path, 'r', encoding='utf-8') as f:
+		config = json.load(f)
 
-    os_type = get_platform()
+	os_type = get_platform()
 
-    if os_type == "macos":
-        spec_content = _create_macos_spec(config)
-    elif os_type == "linux":
-        spec_content = _create_linux_spec(config)
-    else:  # windows
-        spec_content = _create_windows_spec(config)
+	if os_type == 'macos':
+		spec_content = _create_macos_spec(config)
+	elif os_type == 'linux':
+		spec_content = _create_linux_spec(config)
+	else:  # windows
+		spec_content = _create_windows_spec(config)
 
-    spec_path = Path(f"build-{os_type}.spec")
-    spec_path.write_text(spec_content, encoding="utf-8")
+	spec_path = Path(f'build-{os_type}.spec')
+	spec_path.write_text(spec_content, encoding='utf-8')
 
-    return str(spec_path)
+	return str(spec_path)
 
 
 def _create_windows_spec(config):
-    bundle_type = config.get("bundle", {}).get("windows", "directory")
-    console = config.get("console", False)
+	bundle_type = config.get('bundle', {}).get('windows', 'directory')
+	console = config.get('console', False)
 
-    base_spec = f"""# -*- mode: python ; coding: utf-8 -*-
+	base_spec = f"""# -*- mode: python ; coding: utf-8 -*-
 
 block_cipher = None
 
@@ -79,10 +78,10 @@ pyz = PYZ(a.pure, a.zipped_data,
           cipher=block_cipher)
 """
 
-    if bundle_type == "onefile":
-        return (
-            base_spec
-            + f"""
+	if bundle_type == 'onefile':
+		return (
+			base_spec
+			+ f"""
 exe = EXE(
     pyz,
     a.scripts,
@@ -90,7 +89,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='{config.get("name", "pyloid-app")}',
+    name='{config.get('name', 'pyloid-app')}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -106,17 +105,17 @@ exe = EXE(
     icon='{config.get('icon', 'src-pyloid/icons/icon.ico')}'
 )
 """
-        )
-    else:
-        return (
-            base_spec
-            + f"""
+		)
+	else:
+		return (
+			base_spec
+			+ f"""
 exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
-    name='{config.get("name", "pyloid-app")}',
+    name='{config.get('name', 'pyloid-app')}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -138,15 +137,15 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='{config.get("name", "pyloid-app")}'
+    name='{config.get('name', 'pyloid-app')}'
 )
 """
-        )
+		)
 
 
 def _create_macos_spec(config):
-    console = config.get("console", False)
-    return f"""# -*- mode: python ; coding: utf-8 -*-
+	console = config.get('console', False)
+	return f"""# -*- mode: python ; coding: utf-8 -*-
 
 a = Analysis(
     ['{config['main_script']}'],
@@ -169,7 +168,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='{config.get("name", "pyloid-app")}',
+    name='{config.get('name', 'pyloid-app')}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -190,12 +189,12 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='{config.get("name", "pyloid-app")}'
+    name='{config.get('name', 'pyloid-app')}'
 )
 
 app = BUNDLE(
     coll,
-    name='{config.get("name", "pyloid-app")}.app',
+    name='{config.get('name', 'pyloid-app')}.app',
     icon='{config.get('icon', 'src-pyloid/icons/icon.icns')}',
     bundle_identifier=None
 )
@@ -203,10 +202,10 @@ app = BUNDLE(
 
 
 def _create_linux_spec(config):
-    bundle_type = config.get("bundle", {}).get("linux", "directory")
-    console = config.get("console", False)
+	bundle_type = config.get('bundle', {}).get('linux', 'directory')
+	console = config.get('console', False)
 
-    base_spec = f"""# -*- mode: python ; coding: utf-8 -*-
+	base_spec = f"""# -*- mode: python ; coding: utf-8 -*-
 
 block_cipher = None
 
@@ -230,10 +229,10 @@ pyz = PYZ(a.pure, a.zipped_data,
           cipher=block_cipher)
 """
 
-    if bundle_type == "onefile":
-        return (
-            base_spec
-            + f"""
+	if bundle_type == 'onefile':
+		return (
+			base_spec
+			+ f"""
 exe = EXE(
     pyz,
     a.scripts,
@@ -241,7 +240,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='{config.get("name", "pyloid-app")}',
+    name='{config.get('name', 'pyloid-app')}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -257,17 +256,17 @@ exe = EXE(
     icon='{config.get('icon', 'src-pyloid/icons/icon.png')}'
 )
 """
-        )
-    else:
-        return (
-            base_spec
-            + f"""
+		)
+	else:
+		return (
+			base_spec
+			+ f"""
 exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
-    name='{config.get("name", "pyloid-app")}',
+    name='{config.get('name', 'pyloid-app')}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -289,7 +288,7 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='{config.get("name", "pyloid-app")}'
+    name='{config.get('name', 'pyloid-app')}'
 )
 """
-        )
+		)
