@@ -1,7 +1,8 @@
 import os
 import shutil
 import time
-import glob
+import fnmatch
+from pathlib import Path
 from typing import List, Tuple
 from rich.console import Console
 from rich.panel import Panel
@@ -10,21 +11,59 @@ from rich.text import Text
 from rich.layout import Layout
 
 
-def optimize(path: str, remove_list: List[str]):
+def parse_spec_file(spec_file: str) -> Tuple[List[str], List[str]]:
 	"""
-	Optimize PyInstaller build output by removing unnecessary files.
+	Parse spec file to extract include and exclude patterns.
 
 	Parameters
 	----------
-	path : str
-	    app build output path.
-	remove_list : List[str]
-	    List of files or folders to remove. Supports wildcards (*, ?).
+	spec_file : str
+	    Path to the spec file containing patterns.
+
+	Returns
+	-------
+	Tuple[List[str], List[str]]
+	    (include_patterns, exclude_patterns)
 	"""
+	include_patterns = []
+	exclude_patterns = []
+
+	spec_path = Path(spec_file)
+	if not spec_path.exists():
+		raise FileNotFoundError(f"Spec file not found: {spec_file}")
+
+	with open(spec_path, 'r', encoding='utf-8') as f:
+		for line in f:
+			line = line.strip()
+			if not line or line.startswith('#'):
+				continue  # Skip empty lines and comments
+
+			if line.startswith('!'):
+				exclude_patterns.append(line[1:])  # Remove '!' prefix
+			else:
+				include_patterns.append(line)
+
+	return include_patterns, exclude_patterns
+
+
+def optimize(base_path: str, spec_file: str):
+	"""
+	Optimize PyInstaller build output by removing unnecessary files based on spec file.
+
+	Parameters
+	----------
+	base_path : str
+	    Base path containing the build output (_internal folder).
+	spec_file : str
+	    Path to the spec file containing removal patterns.
+	"""
+	# Parse spec file
+	include_patterns, exclude_patterns = parse_spec_file(spec_file)
+
 	console = Console()
 
 	# Target directory for optimization
-	target_dir = os.path.join(path, "_internal")
+	target_dir = Path(base_path)
 
 	# Get terminal width
 	terminal_width = console.size.width
@@ -32,24 +71,25 @@ def optimize(path: str, remove_list: List[str]):
 	# Dynamically calculate left info panel width (50% of total width, minimum 40)
 	info_panel_width = max(40, int(terminal_width * 0.5))
 
-	def get_size_info(path: str) -> Tuple[int, int, int]:
+	def get_size_info(path: Path) -> Tuple[int, int, int]:
 		"""Get size information for a path (total size, file count, directory count)"""
 		total_size = 0
 		file_count = 0
 		dir_count = 0
 
-		if os.path.isfile(path):
-			total_size = os.path.getsize(path)
+		if path.is_file():
+			total_size = path.stat().st_size
 			file_count = 1
-		elif os.path.isdir(path):
-			for root, dirs, files in os.walk(path):
-				dir_count += len(dirs)
-				for file in files:
+		elif path.is_dir():
+			for item in path.rglob('*'):
+				if item.is_file():
 					try:
-						total_size += os.path.getsize(os.path.join(root, file))
+						total_size += item.stat().st_size
 						file_count += 1
 					except OSError:
 						pass
+				elif item.is_dir():
+					dir_count += 1
 			dir_count += 1  # Include current directory
 
 		return total_size, file_count, dir_count
@@ -64,16 +104,20 @@ def optimize(path: str, remove_list: List[str]):
 			size_bytes /= 1024.0
 		return f'{size_bytes:.1f} GB'
 
-	# Format remove list for display
-	def format_remove_list(items: List[str]):
-		if not items:
+	# Format patterns for display
+	def format_patterns(include_patterns: List[str], exclude_patterns: List[str]) -> str:
+		all_patterns = []
+		all_patterns.extend(f'[red]DEL {p}[/red]' for p in include_patterns)  # 삭제 패턴
+		all_patterns.extend(f'[green]KEEP {p}[/green]' for p in exclude_patterns)  # 유지 패턴
+
+		if not all_patterns:
 			return 'None'
 
 		formatted_lines = []
 		current_line = ''
 		max_line_length = max(30, info_panel_width - 10)
 
-		for item in items:
+		for item in all_patterns:
 			if len(current_line) + len(item) + 2 <= max_line_length:
 				current_line += (', ' + item) if current_line else item
 			else:
@@ -88,13 +132,15 @@ def optimize(path: str, remove_list: List[str]):
 
 	# Info panel content - converted to function for dynamic updates
 	def create_info_panel(processed=0, total_size_saved=0, current_item=''):
-		formatted_list = format_remove_list(remove_list)
-		progress_percent = int((processed / len(remove_list)) * 100) if remove_list else 0
+		formatted_list = format_patterns(include_patterns, exclude_patterns)
+		total_patterns = len(include_patterns) + len(exclude_patterns)
+		progress_percent = int((processed / total_patterns) * 100) if total_patterns else 0
 
 		panel_content = (
 			f'[bold cyan]Target Directory:[/bold cyan]\n[dim]{target_dir}[/dim]\n\n'
-			f'[bold cyan]Remove List ({len(remove_list)} items):[/bold cyan]\n{formatted_list}\n\n'
-			f'[bold cyan]Progress:[/bold cyan] {processed}/{len(remove_list)} ({progress_percent}%)\n'
+			f'[bold cyan]Spec File:[/bold cyan]\n[dim]{spec_file}[/dim]\n\n'
+			f'[bold cyan]Patterns ({total_patterns} items):[/bold cyan]\n{formatted_list}\n\n'
+			f'[bold cyan]Progress:[/bold cyan] {processed}/{total_patterns} ({progress_percent}%)\n'
 			f'[bold cyan]Space Saved:[/bold cyan] {format_size(total_size_saved)}\n'
 		)
 
@@ -142,7 +188,7 @@ def optimize(path: str, remove_list: List[str]):
 			log_text.append('\n')
 
 	try:
-		if not os.path.isdir(target_dir):
+		if not target_dir.is_dir():
 			console.print(f'\n[bold red]ERROR: Target directory not found.[/bold red]')
 			console.print(f'[dim]Path: {target_dir}[/dim]')
 			raise FileNotFoundError(f"Target directory '{target_dir}' does not exist.")
@@ -158,90 +204,106 @@ def optimize(path: str, remove_list: List[str]):
 		total_removed_dirs = 0
 		error_count = 0
 
-		# Expand wildcard patterns
-		expanded_remove_list = []
-		for item in remove_list:
-			if '*' in item or '?' in item:
-				# For wildcard patterns, find matching files/folders
-				pattern_path = os.path.join(target_dir, item)
-				matches = glob.glob(pattern_path)
-				if matches:
-					# Convert to relative paths and add to list
-					for match in matches:
-						relative_path = os.path.relpath(match, target_dir)
-						expanded_remove_list.append(
-							(item, relative_path)
-						)  # (original pattern, actual path)
-				else:
-					# Keep original pattern even if no matches (will be marked as not found)
-					expanded_remove_list.append((item, item))
-			else:
-				# Add regular items as-is
-				expanded_remove_list.append((item, item))
+		# Find all files and directories to process
+		items_to_remove = []
+
+		def expand_double_star(pattern: str) -> List[str]:
+			"""Expand ** patterns into multiple fnmatch patterns"""
+			if '**' not in pattern:
+				return [pattern]
+
+			parts = pattern.split('**', 1)
+			if len(parts) != 2:
+				return [pattern]
+
+			prefix, suffix = parts
+			prefix = prefix.rstrip('/')
+			suffix = suffix.lstrip('/')
+
+			# Generate patterns for different depths (up to depth 10)
+			patterns = []
+			for depth in range(10):  # Limit depth to prevent infinite expansion
+				if prefix and suffix:
+					# Pattern like "dir/**/*.ext"
+					middle = '/*' * depth
+					patterns.append(f"{prefix}{middle}/{suffix}")
+					patterns.append(f"{prefix}{middle}{suffix}")  # Also match files directly
+				elif prefix:
+					# Pattern like "dir/**/*"
+					middle = '/*' * depth
+					patterns.append(f"{prefix}{middle}/*")
+					patterns.append(f"{prefix}{middle}")
+				elif suffix:
+					# Pattern like "**/*.ext" - match at any depth
+					middle = '/*' * depth
+					patterns.append(f"{middle}/{suffix}")
+					patterns.append(f"{middle}{suffix}")
+
+			return patterns
+
+		def matches_pattern(path_str: str, pattern: str) -> bool:
+			"""Check if path matches pattern using expanded fnmatch patterns"""
+			expanded_patterns = expand_double_star(pattern)
+			return any(fnmatch.fnmatch(path_str, p) for p in expanded_patterns)
+
+		for item in target_dir.rglob('*'):
+			if not item.exists():  # Skip if item was already deleted
+				continue
+
+			relative_path = item.relative_to(target_dir)
+			path_str = str(relative_path)
+
+			# Check if item matches any include pattern
+			matches_include = any(matches_pattern(path_str, pattern) for pattern in include_patterns)
+
+			# Check if item matches any exclude pattern
+			matches_exclude = any(matches_pattern(path_str, pattern) for pattern in exclude_patterns)
+
+			# Include if matches include pattern and doesn't match exclude patterns
+			if matches_include and not matches_exclude:
+				items_to_remove.append(item)
 
 		with Live(
 			layout, console=console, refresh_per_second=10, vertical_overflow='visible'
 		) as live:
-			total_items = len(expanded_remove_list)
+			total_items = len(items_to_remove)
 
-			for i, (original_pattern, actual_path) in enumerate(expanded_remove_list):
-				item_path = os.path.join(target_dir, actual_path)
+			for i, item_path in enumerate(items_to_remove):
+				relative_path = item_path.relative_to(target_dir)
 
-				# Update info panel (show current item being processed - display original pattern)
-				display_name = (
-					f'{original_pattern} -> {actual_path}'
-					if original_pattern != actual_path
-					else actual_path
-				)
-				update_layout(i, total_removed_size, display_name)
+				# Update info panel
+				update_layout(i, total_removed_size, str(relative_path))
 
 				# Add artificial delay for visual effect
 				time.sleep(0.05)
 
-				if os.path.exists(item_path):
-					try:
-						# Calculate size before removal
-						size_before, files_before, dirs_before = get_size_info(item_path)
+				try:
+					# Calculate size before removal
+					size_before, files_before, dirs_before = get_size_info(item_path)
 
-						if os.path.isfile(item_path) or os.path.islink(item_path):
-							os.remove(item_path)
-							log_message = f'[OK] Removed File: {actual_path}'
-							if original_pattern != actual_path:
-								log_message += f' (matched by {original_pattern})'
-							log_message += f' ({format_size(size_before)})'
-							update_log(log_message, 'green')
-							total_removed_files += 1
-						elif os.path.isdir(item_path):
-							shutil.rmtree(item_path)
-							log_message = f'[OK] Removed Dir:  {actual_path}'
-							if original_pattern != actual_path:
-								log_message += f' (matched by {original_pattern})'
-							log_message += f' ({format_size(size_before)}, {files_before} files)'
-							update_log(log_message, 'green')
-							total_removed_dirs += 1
-							total_removed_files += files_before
+					if item_path.is_file():
+						item_path.unlink()
+						log_message = f'[OK] Removed File: {relative_path} ({format_size(size_before)})'
+						update_log(log_message, 'green')
+						total_removed_files += 1
+					elif item_path.is_dir():
+						shutil.rmtree(item_path)
+						log_message = f'[OK] Removed Dir:  {relative_path} ({format_size(size_before)}, {files_before} files)'
+						update_log(log_message, 'green')
+						total_removed_dirs += 1
+						total_removed_files += files_before
 
-						removed_count += 1
-						total_removed_size += size_before
+					removed_count += 1
+					total_removed_size += size_before
 
-						# Update info panel (reflect progress)
-						update_layout(i + 1, total_removed_size)
+					# Update info panel (reflect progress)
+					update_layout(i + 1, total_removed_size)
 
-					except OSError as e:
-						log_message = f'[ERROR] Error removing {actual_path}: {e}'
-						if original_pattern != actual_path:
-							log_message += f' (matched by {original_pattern})'
-						update_log(log_message, 'bold red')
-						error_count += 1
-						# Update info panel (reflect progress)
-						update_layout(i + 1, total_removed_size)
-				else:
-					log_message = f'[SKIP] Not found:    {actual_path}'
-					if original_pattern != actual_path:
-						log_message += f' (pattern: {original_pattern})'
-					update_log(log_message, 'yellow')
-					not_found_count += 1
-					# 정보 패널 업데이트 (진행 상황 반영)
+				except OSError as e:
+					log_message = f'[ERROR] Error removing {relative_path}: {e}'
+					update_log(log_message, 'bold red')
+					error_count += 1
+					# Update info panel (reflect progress)
 					update_layout(i + 1, total_removed_size)
 
 				live.update(layout)
@@ -261,7 +323,6 @@ def optimize(path: str, remove_list: List[str]):
 				f'Items Removed: {removed_count} ({total_removed_files} files, {total_removed_dirs} dirs)',
 				'green',
 			)
-			update_log(f'Not Found: {not_found_count}', 'yellow' if not_found_count > 0 else 'dim')
 			if error_count > 0:
 				update_log(f'Errors: {error_count}', 'red')
 
@@ -272,15 +333,14 @@ def optimize(path: str, remove_list: List[str]):
 			log_panel.title = '[bold green][COMPLETE] Optimization Complete[/bold green]'
 
 			# Final info panel update (completion status)
-			update_layout(len(remove_list), total_removed_size, 'Complete!')
+			total_patterns = len(include_patterns) + len(exclude_patterns)
+			update_layout(total_patterns, total_removed_size, 'Complete!')
 			live.update(layout)
 
 		console.print('\n[bold green]Your application has been optimized![/bold green]')
 		console.print(f'[dim]Space saved: {format_size(total_removed_size)}[/dim]')
 		console.print(f'[dim]Processing time: {elapsed_time:.1f} seconds[/dim]')
-		console.print(
-			f'[dim]Total items processed: {removed_count + not_found_count + error_count}[/dim]'
-		)
+		console.print(f'[dim]Total items processed: {removed_count + error_count}[/dim]')
 
 	except Exception as e:
 		console.print(f'\n[bold red]An unexpected error occurred: {str(e)}[/bold red]')
@@ -294,6 +354,7 @@ if __name__ == '__main__':
 	app_name = 'MyApp'
 	dist_path = 'dist'
 	internal_path = os.path.join(dist_path, app_name, '_internal')
+	spec_file_path = 'test_optimize.spec'
 
 	print('Creating dummy build files for testing...')
 	os.makedirs(internal_path, exist_ok=True)
@@ -315,25 +376,29 @@ if __name__ == '__main__':
 		os.makedirs(os.path.dirname(p), exist_ok=True)
 		with open(p, 'w') as fp:
 			fp.write('dummy content')
-	print('Dummy files created.\n')
+	print('Dummy files created.')
 
-	# 2. Define files to remove
-	files_to_remove = [
-		'tcl',  # Entire tcl folder
-		'tk',  # Entire tk folder
-		'*.dll',  # All dll files (wildcard pattern)
-		'libEGL.dll',  # Specific file (duplicate test)
-		'non_existent_file.dll',  # Non-existent file (test case)
-	]
+	# 2. Create spec file with patterns
+	spec_content = '''# Test optimization spec file
+# Include patterns
+tcl/**/*
+tk/**/*
+*.dll
+libEGL.dll
+useless_temp_file.tmp
+
+# Exclude patterns
+!tcl/tcl8.6/init.tcl
+!python3.dll
+'''
+
+	with open(spec_file_path, 'w') as f:
+		f.write(spec_content)
+	print(f'Spec file created: {spec_file_path}\n')
 
 	# 3. Run optimization function
 	try:
-		optimize(name=app_name, distpath=dist_path, remove_list=files_to_remove)
+		optimize(base_path=internal_path, spec_file=spec_file_path)
 	except Exception as e:
 		print(f'Optimization failed: {e}')
-	finally:
-		# 4. Clean up dummy folders after testing
-		if os.path.exists(dist_path):
-			print('\nCleaning up dummy build files...')
-			shutil.rmtree(dist_path)
-			print('Cleanup complete.')
+
