@@ -16,6 +16,7 @@ if __name__ == '__main__':
 	spec_content = '''# Test spec for test1 build
 *.dll
 !python3.dll
+localpy*
 '''
 
 	spec_file = 'test1_optimize.spec'
